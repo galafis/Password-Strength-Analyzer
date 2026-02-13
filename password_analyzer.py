@@ -6,8 +6,8 @@ Advanced password security analysis and strength testing tool.
 
 import re
 import math
-import hashlib
-import requests
+import string
+import secrets
 from flask import Flask, render_template_string, jsonify, request
 
 app = Flask(__name__)
@@ -81,7 +81,7 @@ class PasswordAnalyzer:
         return {
             'is_common': password.lower() in self.common_passwords,
             'contains_personal_info': self._contains_personal_info(password),
-            'pwned_check': self._check_pwned_passwords(password),
+            'in_common_list': self._is_in_common_list(password),
             'meets_basic_requirements': self._meets_basic_requirements(password)
         }
     
@@ -214,10 +214,8 @@ class PasswordAnalyzer:
         
         return False
     
-    def _check_pwned_passwords(self, password):
-        """Check against Have I Been Pwned database (simulated)."""
-        # In real implementation, this would check against HIBP API
-        # For demo, simulate based on common passwords
+    def _is_in_common_list(self, password):
+        """Check if password appears in the built-in common passwords list."""
         return password.lower() in self.common_passwords
     
     def _meets_basic_requirements(self, password):
@@ -271,7 +269,7 @@ class PasswordAnalyzer:
         # Security checks (0-30 points)
         if not analysis['security_checks']['is_common']:
             score += 10
-        if not analysis['security_checks']['pwned_check']:
+        if not analysis['security_checks']['in_common_list']:
             score += 10
         if analysis['security_checks']['meets_basic_requirements']['all_met']:
             score += 10
@@ -435,7 +433,7 @@ HTML_TEMPLATE = """
         
         .metric {
             display: flex;
-            justify-content: between;
+            justify-content: space-between;
             padding: 10px 0;
             border-bottom: 1px solid #e0e0e0;
         }
@@ -485,7 +483,7 @@ HTML_TEMPLATE = """
         
         .security-check {
             display: flex;
-            justify-content: between;
+            justify-content: space-between;
             align-items: center;
             padding: 8px 0;
         }
@@ -641,9 +639,9 @@ HTML_TEMPLATE = """
                     </span>
                 </div>
                 <div class="security-check">
-                    <span>Previously Breached:</span>
-                    <span class="${securityChecks.pwned_check ? 'check-fail' : 'check-pass'}">
-                        ${securityChecks.pwned_check ? '✗ Yes' : '✓ No'}
+                    <span>In Common List:</span>
+                    <span class="${securityChecks.in_common_list ? 'check-fail' : 'check-pass'}">
+                        ${securityChecks.in_common_list ? '✗ Yes' : '✓ No'}
                     </span>
                 </div>
                 <div class="security-check">
@@ -700,24 +698,37 @@ HTML_TEMPLATE = """
         }
         
         function generatePassword() {
-            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
-            let password = '';
-            
+            const upper = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+            const lower = 'abcdefghijklmnopqrstuvwxyz';
+            const digits = '0123456789';
+            const special = '!@#$%^&*';
+            const all = upper + lower + digits + special;
+
+            function secureRandom(max) {
+                const array = new Uint32Array(1);
+                crypto.getRandomValues(array);
+                return array[0] % max;
+            }
+
+            let chars = [];
             // Ensure at least one of each type
-            password += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[Math.floor(Math.random() * 26)];
-            password += 'abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 26)];
-            password += '0123456789'[Math.floor(Math.random() * 10)];
-            password += '!@#$%^&*'[Math.floor(Math.random() * 8)];
-            
+            chars.push(upper[secureRandom(upper.length)]);
+            chars.push(lower[secureRandom(lower.length)]);
+            chars.push(digits[secureRandom(digits.length)]);
+            chars.push(special[secureRandom(special.length)]);
+
             // Fill remaining length
             for (let i = 4; i < 16; i++) {
-                password += chars[Math.floor(Math.random() * chars.length)];
+                chars.push(all[secureRandom(all.length)]);
             }
-            
-            // Shuffle password
-            password = password.split('').sort(() => Math.random() - 0.5).join('');
-            
-            document.getElementById('passwordInput').value = password;
+
+            // Fisher-Yates shuffle
+            for (let i = chars.length - 1; i > 0; i--) {
+                const j = secureRandom(i + 1);
+                [chars[i], chars[j]] = [chars[j], chars[i]];
+            }
+
+            document.getElementById('passwordInput').value = chars.join('');
             analyzePassword();
         }
     </script>
@@ -746,6 +757,37 @@ def analyze_password():
     
     return jsonify(analysis)
 
+@app.route('/generate')
+def generate_password():
+    """Generate a secure random password."""
+    length = request.args.get('length', 16, type=int)
+    length = max(8, min(length, 128))
+
+    upper = string.ascii_uppercase
+    lower = string.ascii_lowercase
+    digits = string.digits
+    special = '!@#$%^&*'
+    all_chars = upper + lower + digits + special
+
+    # Guarantee at least one of each category
+    chars = [
+        secrets.choice(upper),
+        secrets.choice(lower),
+        secrets.choice(digits),
+        secrets.choice(special),
+    ]
+
+    # Fill remaining length
+    for _ in range(length - 4):
+        chars.append(secrets.choice(all_chars))
+
+    # Fisher-Yates shuffle
+    for i in range(len(chars) - 1, 0, -1):
+        j = secrets.randbelow(i + 1)
+        chars[i], chars[j] = chars[j], chars[i]
+
+    return jsonify({'password': ''.join(chars), 'length': length})
+
 def main():
     """Main execution function."""
     print("Password Strength Analyzer")
@@ -753,7 +795,7 @@ def main():
     
     print("Starting web server...")
     print("Open http://localhost:5000 in your browser")
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=False, host='0.0.0.0', port=5000)
 
 if __name__ == "__main__":
     main()
